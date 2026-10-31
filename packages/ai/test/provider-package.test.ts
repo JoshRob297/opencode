@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
+import { Headers } from "effect/http"
 import { model } from "@opencode/ai/providers/openai"
 import { ai } from "../src/effect.js"
 import { Endpoint } from "../src/route/endpoint.js"
@@ -145,6 +147,49 @@ describe("provider package entrypoints", () => {
       expect(selected.route.defaults.headers).toEqual(settings.headers)
       expect(selected.route.defaults.http?.body).toEqual(settings.body)
     })
+  })
+
+  test("maps OpenCode Zen and Go API entrypoints onto their base URLs with bearer auth", async () => {
+    const modules = await Promise.all([
+      import("@opencode/ai/providers/opencode/chat"),
+      import("@opencode/ai/providers/opencode/responses"),
+      import("@opencode/ai/providers/opencode/messages"),
+      import("@opencode/ai/providers/opencode/gemini"),
+      import("@opencode/ai/providers/opencode-go/chat"),
+      import("@opencode/ai/providers/opencode-go/responses"),
+      import("@opencode/ai/providers/opencode-go/messages"),
+      import("@opencode/ai/providers/opencode-go/gemini"),
+    ])
+    const routes = [
+      ["opencode", "opencode-chat", "https://opencode.ai/inference/openai/v1"],
+      ["opencode", "opencode-responses", "https://opencode.ai/inference/openai/v1"],
+      ["opencode", "opencode-messages", "https://opencode.ai/inference/anthropic/v1"],
+      ["opencode", "opencode-gemini", "https://opencode.ai/inference/google/v1beta"],
+      ["opencode-go", "opencode-go-chat", "https://opencode.ai/inference/go/openai/v1"],
+      ["opencode-go", "opencode-go-responses", "https://opencode.ai/inference/go/openai/v1"],
+      ["opencode-go", "opencode-go-messages", "https://opencode.ai/inference/go/anthropic/v1"],
+      ["opencode-go", "opencode-go-gemini", "https://opencode.ai/inference/go/google/v1beta"],
+    ]
+    const settings = { apiKey: "zen-key", headers: { "x-test": "fixture" }, body: { extension: true } }
+    for (const [index, module] of modules.entries()) {
+      const selected = module.model("zen-model", settings)
+      expect([selected.provider, selected.route.id, selected.route.endpoint.baseURL]).toEqual(routes[index])
+      expect(selected.route.defaults.headers).toEqual(settings.headers)
+      expect(selected.route.defaults.http?.body).toEqual(settings.body)
+      const headers = await Effect.runPromise(
+        selected.route.auth.apply({
+          request: ai.request({ model: selected, prompt: "hi" }),
+          method: "POST",
+          url: "https://opencode.ai/inference",
+          body: "{}",
+          headers: Headers.empty,
+        }),
+      )
+      expect(headers.authorization).toBe("Bearer zen-key")
+      expect(module.model("zen-model", { ...settings, baseURL: "https://zen.test/v1" }).route.endpoint.baseURL).toBe(
+        "https://zen.test/v1",
+      )
+    }
   })
 
   test("maps ZAI and Coding Plan entrypoints onto distinct provider-owned routes", async () => {
